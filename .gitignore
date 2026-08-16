@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+
+# next
+.next/
+out/
+
+# anchor/solana
+programs/doge_vault/target/
+programs/doge_vault/test-ledger/
+test-ledger/
+
+# env
+.env
+.env.*
+!.env.example
+
+# os
+.DS_Store
+
+article/
+
+PLAN.md
+TEST_PLAN.md
+
+**/AGENTS.md
+**/CLAUDE.md
+
+.opencode
+.venv

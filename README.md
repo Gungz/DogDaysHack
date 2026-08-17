@@ -41,9 +41,9 @@ Supabase is used for both image storage (`dogevault-images` bucket) and NFT rece
 
 ### Image generation (dog virtual try-on)
 
-Dog virtual try-on uses an image-generation model; the app prefers **Qwen / DashScope** when `DASHSCOPE_API_KEY` is configured, otherwise falls back to **Gemini** image generation when `GEMINI_API_KEY` is set. Gemini's free tier has **no image-generation quota**, so on a free Gemini key you will see a clear "image generation not enabled" message — set `DASHSCOPE_API_KEY` to enable dog try-on.
+Dog virtual try-on uses an image-generation model; the app prefers **Qwen / DashScope** when `DASHSCOPE_API_KEY` is configured, otherwise falls back to **Gemini** image generation when `GEMINI_API_KEY` is set. Gemini's free tier has **no image-generation quota**, so on a free Gemini key you will see a clear "image generation not enabled" message — set `DASHSCOPE_API_KEY` to enable dog try-on. The routing lives in `apps/web/src/lib/dogTryOn.ts` (`generateDogTryOn` → Qwen via `qwenTryOn.ts` when a DashScope key is present, else Gemini via `geminiTryOn.ts`).
 
-- `DASHSCOPE_API_KEY` — Alibaba DashScope (百炼) API key for Qwen image generation.
+- `DASHSCOPE_API_KEY` — Alibaba DashScope (百炼) API key for Qwen image generation. **Required to enable dog virtual try-on.**
 - `QWEN_IMAGE_MODEL` — model id, defaults to `qwen-image-3.0-pro`.
 - `DASHSCOPE_BASE_URL` — optional override; defaults to `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`. Use your workspace/region URL if your key is not on the default China endpoint (e.g. `https://dashscope-intl.aliyuncs.com/...` for international, or `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/...`). Model, endpoint, and key must share a region.
 
@@ -102,7 +102,7 @@ The Next.js backend calls the Apify MCP server directly using `APIFY_TOKEN`. If 
 - All Solana actions are on devnet only.
 - The app does not complete real retail purchases; approval simulates funding by transferring devnet USDC to the configured treasury.
 - YouCam and Apify calls require credits/tokens.
-- The agent streams progress to the UI in real time: the `/api/agent?stream=1` SSE endpoint emits `step` events (profiling → products → enhance → background → try-on) that the UI renders as a live stepper; buttons are disabled while the agent is busy.
+- The agent streams progress to the UI in real time: the `/api/agent?stream=1` SSE endpoint emits `step` events (profiling → products → enhance → background → try-on), each carrying a `data` payload, that the UI renders as a live stepper **and** progressively (the enhanced portrait, dog profile, Apify product grid, and try-on image each appear as their step lands — before the final result). The product auto-used for the first try-on is highlighted with an emerald ring + "Used for try-on" badge. Buttons are disabled while the agent is busy.
 
 ## Debugging
 
@@ -151,14 +151,15 @@ RUN_LIVE=1 DASHSCOPE_API_KEY=sk-... pnpm test tests/integration/qwen-tryon.test.
 ### Prerequisites
 
 1. Install dependencies: `pnpm install` (in `apps/web` or repo root).
-2. Copy `.env.example` to `.env` and fill what you have. The app runs with missing keys using fallbacks:
-   - Missing `GEMINI_API_KEY`: dog profile/script use a built-in mock.
-   - Missing `APIFY_TOKEN`: product cards use a mock list (only when the key is absent; a real API *error* is surfaced instead of mocked).
-    - Missing `YOUCAM_API_KEY`: enhanced portrait falls back to the original image.
-    - Missing `DASHSCOPE_API_KEY` and no Gemini image capability: dog virtual try-on returns a clear "image generation not enabled" message; YouCam human try-on still works.
-    - Missing Supabase vars: NFT metadata returns an inline `data:` URI.
-    - Missing S3 vars: images use base64 data URLs.
-    - ElevenLabs 402 (free plan, library voice): UI falls back to browser `SpeechSynthesis`.
+2. Copy `.env.example` to `.env` and fill what you have.
+   - **Dog virtual try-on requires `DASHSCOPE_API_KEY` (Qwen / DashScope).** It is the preferred dog try-on engine — without it the app falls back to Gemini image generation, which on a free Gemini key has no quota and returns a clear "image generation not enabled" message (YouCam human try-on still works). See **Image generation (dog virtual try-on)** for `DASHSCOPE_API_KEY`, `QWEN_IMAGE_MODEL`, and `DASHSCOPE_BASE_URL` (region must match your key).
+   - The app runs with other missing keys using fallbacks:
+     - Missing `GEMINI_API_KEY`: dog profile/script use a built-in mock.
+     - Missing `APIFY_TOKEN`: product cards use a mock list (only when the key is absent; a real API *error* is surfaced instead of mocked).
+     - Missing `YOUCAM_API_KEY`: enhanced portrait falls back to the original image.
+     - Missing Supabase vars: NFT metadata returns an inline `data:` URI.
+     - Missing S3 vars: images use base64 data URLs.
+     - ElevenLabs 402 (free plan, library voice): UI falls back to browser `SpeechSynthesis`.
 3. Use a Solana devnet wallet (Phantom/Solflare). Airdrop devnet SOL and devnet USDC to your wallet before funding the vault.
 
 ### Run locally
@@ -173,8 +174,9 @@ pnpm dev
 1. Click **Connect Wallet** (devnet) and ensure it shows your pubkey.
 2. Choose a dog photo (PNG/JPG/WEBP) and click **Run Dog Agent**.
     - Expect an enhanced portrait, dog profile chips, a voice button, and Apify product cards (each with an image, price/source/rating, an "Open product ↗" link, and an approve button).
-    - The agent auto-runs a virtual try-on; manual "Try as clothes / hat / shoes" buttons appear for the selected product. For a dog, this uses Qwen/Gemini image generation; for a human, YouCam.
-    - Provider status badges show `ok` / `missing_key` / `error`.
+     - The agent auto-runs a virtual try-on; manual "Try as …" buttons (labeled **Clothes** / **Hat** / **Shoes**) appear for the selected product, and the product auto-used for the first try-on is highlighted with an emerald ring + "Used for try-on" badge. For a dog, this uses Qwen/Gemini image generation; for a human, YouCam.
+     - Results stream in progressively: the enhanced portrait, dog profile, product grid, and try-on image each appear as their step completes.
+     - Provider status badges show `ok` / `missing_key` / `error`.
 3. Click **Generate ElevenLabs voice** to hear the stylist line.
 4. Click **1) Initialize vault**, then **2) Fund 25 USDC**.
    - Vault PDA and last transaction link appear.

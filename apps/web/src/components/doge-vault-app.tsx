@@ -413,7 +413,7 @@ export function DogeVaultApp() {
                   {voiceUrl ? <audio className="mt-4 w-full" controls src={voiceUrl} /> : null}
                   <div className="mt-4 rounded-3xl bg-slate-950 p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-300">Virtual try-on (hybrid)</p>
-                    <p className="mt-1 text-[11px] text-white/50">YouCam for people · Gemini for dogs</p>
+                    <p className="mt-1 text-[11px] text-white/50">YouCam for people · Qwen for dogs</p>
                     {tryOnImage ? (
                       <img src={tryOnImage} alt="Subject in outfit" className="mt-3 h-48 w-full rounded-2xl object-cover" />
                     ) : (

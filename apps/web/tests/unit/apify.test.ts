@@ -77,6 +77,19 @@ describe("normalizeProducts", () => {
   it("returns [] when given a non-array run object", () => {
     expect(normalizeProducts({ status: "RUNNING" }, "q", 5)).toEqual([]);
   });
+
+  it("uses query-scoped fallback ids so different queries never collide", () => {
+    const a = normalizeProducts([{ title: "A" }], "luxury dog collar", 5);
+    const b = normalizeProducts([{ title: "B" }], "dog hat", 5);
+    expect(a[0].id).not.toBe(b[0].id);
+    expect(a[0].id).toBe("luxury-dog-collar-0");
+    expect(b[0].id).toBe("dog-hat-0");
+  });
+
+  it("reads product urls from alternate keys (webUrl/buyUrl)", () => {
+    const [p] = normalizeProducts([{ title: "X", webUrl: "https://site/x", image: "https://img/x.jpg" }], "q", 5);
+    expect(p.url).toBe("https://site/x");
+  });
 });
 
 describe("searchProductsWithApify (mocked MCP)", () => {

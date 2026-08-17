@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { tryOnProduct, type TryOnKind } from "@/lib/youcam";
-import { generateDogTryOn } from "@/lib/geminiTryOn";
+import { generateDogTryOn } from "@/lib/dogTryOn";
 
 export const runtime = "nodejs";
 

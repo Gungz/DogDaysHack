@@ -24,12 +24,12 @@ apify_toolset = McpToolset(
 )
 
 root_agent = LlmAgent(
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     name="product_scout_agent",
     description="Finds live e-commerce product data by calling Apify Actors as MCP tools.",
     instruction=(
         "You are a product research agent. Use the Apify e-commerce scraping tool to "
-        "find real product offers for the user's query. Actor runs are asynchronous: "
+        "find real product offers for the user's query from Amazon and EBay. Actor runs are asynchronous: "
         "if a tool returns a run that is still RUNNING, call get-actor-run with the "
         "runId to wait for it, then call get-dataset-items with the datasetId to read "
         "the products. Summarize at most 5 products with name, price, currency and URL."

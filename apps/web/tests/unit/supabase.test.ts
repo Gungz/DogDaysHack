@@ -37,7 +37,7 @@ describe("supabase", () => {
       description: "d",
       image: "https://img",
       attributes: [],
-      dog_profile: { breedGuess: "x", size: "unknown", vibe: "y", colorPalette: [], stylistSummary: "s", voiceScript: "v", productQueries: [] },
+      dog_profile: { breedGuess: "x", size: "unknown", vibe: "y", colorPalette: [], stylistSummary: "s", voiceScript: "v", productQueries: [], subjectType: "unknown" },
       product: { id: "1", title: "Collar", url: "u", imageUrl: "i", priceText: "$1", priceAmount: 1, currency: "USD", rating: 5, reviewCount: 1, source: "apify", queryUsed: "q" },
       created_at: new Date().toISOString(),
     };
@@ -51,7 +51,7 @@ describe("supabase", () => {
 
   it("builds metadata with attributes", () => {
     const meta = buildNftMetadata({
-      dogProfile: { breedGuess: "Beagle", size: "medium", vibe: "happy", colorPalette: ["brown"], stylistSummary: "s", voiceScript: "v", productQueries: [] },
+      dogProfile: { breedGuess: "Beagle", size: "medium", vibe: "happy", colorPalette: ["brown"], stylistSummary: "s", voiceScript: "v", productQueries: [], subjectType: "dog" },
       product: { id: "1", title: "Collar", url: "u", imageUrl: "i", priceText: "$9", priceAmount: 9, currency: "USD", source: "apify", queryUsed: "q" },
       enhancedImageUrl: "https://img",
     });

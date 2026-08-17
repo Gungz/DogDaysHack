@@ -96,7 +96,10 @@ export function normalizeProducts(raw: unknown, queryUsed: string, max: number, 
             ? (rawOffers as Record<string, unknown>)
             : {};
       const title = pickString(item, ["title", "name", "productName"]) || `Product ${index + 1}`;
-      const url = pickString(item, ["url", "productUrl", "link"]) || "https://example.com";
+      const url =
+        pickString(item, ["url", "productUrl", "link", "href", "canonicalUrl", "webUrl", "buyUrl", "productLink", "offerUrl", "productUrl"]) ||
+        pickString(firstOffer as Record<string, unknown>, ["url", "link", "href"]) ||
+        "https://example.com";
       const priceText =
         pickString(item, ["price", "priceText", "currentPrice"]) ||
         (typeof firstOffer.price === "string" ? firstOffer.price : undefined);
@@ -104,7 +107,7 @@ export function normalizeProducts(raw: unknown, queryUsed: string, max: number, 
       const rating = parsePrice(item.rating ?? item.averageRating);
       const reviewCount = parsePrice(item.reviewCount ?? item.reviews);
       return {
-        id: pickString(item, ["id", "asin", "sku"]) || `${url.slice(0, 24)}-${index}`,
+        id: pickString(item, ["id", "asin", "sku"]) || `${queryUsed.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}-${index}`,
         title,
         url,
         imageUrl: pickString(item, ["image", "imageUrl", "thumbnail", "img"]),

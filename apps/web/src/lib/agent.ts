@@ -1,6 +1,6 @@
 import { searchProductsWithApify, categoryFromText } from "./apifyMcp";
 import { generateDogProfile } from "./gemini";
-import { generateDogTryOn } from "./geminiTryOn";
+import { generateDogTryOn } from "./dogTryOn";
 import { storeImage } from "./supabase";
 import { debugStep } from "./log";
 import type { AgentResult, AgentStep, ProductCategory } from "./types";
@@ -104,7 +104,7 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
     } else {
       portraitUrl = storedOriginalUrl || fallbackImageUrl;
     }
-    onStep?.({ name: "portrait", label: "Enhancing & styling portrait", status: "done" });
+    onStep?.({ name: "portrait", label: "Enhancing & styling portrait", status: "done", data: { enhancedImageUrl: portraitUrl } });
   } catch (error) {
     notes.push(`portrait: ${error instanceof Error ? error.message : "unknown error"}`);
     onStep?.({ name: "portrait", label: "Enhancing & styling portrait", status: "error", detail: error instanceof Error ? error.message : "unknown error" });
@@ -136,8 +136,9 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
     onStep,
     "profile",
     "Profiling dog with Gemini",
-  ) ?? { profile: { breedGuess: "Unknown", size: "unknown" as const, vibe: "", colorPalette: [], stylistSummary: "", voiceScript: "", productQueries: [] }, status: "error" as const };
+  ) ?? { profile: { breedGuess: "Unknown", size: "unknown" as const, vibe: "", colorPalette: [], stylistSummary: "", voiceScript: "", productQueries: [], subjectType: "unknown" as const }, status: "error" as const };
   debugStep("gemini-profile", { fileName: file.name }, { status: gemini.status, profile: gemini.profile });
+  onStep?.({ name: "profile", label: "Profiling dog with Gemini", status: "done", data: { dogProfile: gemini.profile } });
 
   const apify = await safe(
     "apify-products",
@@ -153,6 +154,7 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
     "Searching products with Apify",
   ) ?? { products: [], status: "error" as const };
   debugStep("apify-products", { queries: gemini.profile.productQueries }, { status: apify.status, count: apify.products.length });
+  onStep?.({ name: "products", label: "Searching products with Apify", status: "done", data: { products: apify.products } });
 
   // --- Category-aware virtual try-on ---
   // Detect what the first product actually is (from its category tag, falling back to
@@ -166,15 +168,15 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
     tryOnKind = tryOnKindForProduct(firstProductWithImage);
     const isHuman = gemini.profile.subjectType === "human";
     tryOnEngine = isHuman ? "youcam" : "gemini";
-    onStep?.({ name: "tryon", label: `Virtual try-on (${tryOnEngine}): ${tryOnKind}`, status: "start" });
+    onStep?.({ name: "tryon", label: `Virtual try-on (${tryOnEngine}): ${tryOnKind}`, status: "start", data: { tryOnProductId: firstProductWithImage?.id ?? null } });
 
     try {
       if (isHuman) {
         tryOnImageUrl = await tryOnProduct(tryOnKind as TryOnKind, portraitUrl, firstProductWithImage.imageUrl as string);
         if (tryOnImageUrl) {
-          onStep?.({ name: "tryon", label: `Virtual try-on (YouCam): ${tryOnKind}`, status: "done" });
+          onStep?.({ name: "tryon", label: `Virtual try-on (YouCam): ${tryOnKind}`, status: "done", data: { tryOnImageUrl, tryOnProductId: firstProductWithImage?.id ?? null } });
         } else {
-          onStep?.({ name: "tryon", label: `Virtual try-on (YouCam): ${tryOnKind}`, status: "error", detail: "YouCam returned no result (human try-on needs a clear upper-body photo)." });
+          onStep?.({ name: "tryon", label: `Virtual try-on (YouCam): ${tryOnKind}`, status: "error", detail: "YouCam returned no result (human try-on needs a clear upper-body photo).", data: { tryOnImageUrl: null, tryOnProductId: firstProductWithImage?.id ?? null } });
           notes.push(`tryon(${tryOnKind}): YouCam returned no result`);
         }
       } else {
@@ -188,18 +190,18 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
         });
         tryOnImageUrl = result.url;
         if (result.status === "ok") {
-          onStep?.({ name: "tryon", label: `Virtual try-on (Gemini): ${tryOnKind}`, status: "done" });
+          onStep?.({ name: "tryon", label: `Virtual try-on: ${tryOnKind}`, status: "done", data: { tryOnImageUrl, tryOnProductId: firstProductWithImage?.id ?? null } });
         } else {
-          onStep?.({ name: "tryon", label: `Virtual try-on (Gemini): ${tryOnKind}`, status: "error", detail: result.note });
+          onStep?.({ name: "tryon", label: `Virtual try-on: ${tryOnKind}`, status: "error", detail: result.note, data: { tryOnImageUrl: null, tryOnProductId: firstProductWithImage?.id ?? null } });
           if (result.note) notes.push(`tryon(${tryOnKind}): ${result.note}`);
         }
       }
     } catch (error) {
       notes.push(`tryon(${tryOnKind}): ${error instanceof Error ? error.message : "error"}`);
-      onStep?.({ name: "tryon", label: `Virtual try-on: ${tryOnKind}`, status: "error", detail: error instanceof Error ? error.message : "error" });
+      onStep?.({ name: "tryon", label: `Virtual try-on: ${tryOnKind}`, status: "error", detail: error instanceof Error ? error.message : "error", data: { tryOnImageUrl: null, tryOnProductId: firstProductWithImage?.id ?? null } });
     }
   } else {
-    onStep?.({ name: "tryon", label: "Virtual try-on", status: "done", detail: "No product image available" });
+    onStep?.({ name: "tryon", label: "Virtual try-on", status: "done", detail: "No product image available", data: { tryOnImageUrl: null, tryOnProductId: null } });
   }
   debugStep("agent:tryon", { engine: tryOnEngine, kind: tryOnKind, portraitUrl, product: firstProductWithImage?.imageUrl }, tryOnImageUrl);
 
@@ -215,6 +217,7 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
     tryOnImageUrl: tryOnImageUrl ?? null,
     dogProfile: gemini.profile,
     products: apify.products,
+    tryOnProductId: firstProductWithImage?.id ?? null,
     providerStatus: {
       youcam: youcamStatus,
       gemini: gemini.status,

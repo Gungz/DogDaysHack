@@ -5,7 +5,7 @@ import type { TryOnKind } from "./youcam";
 
 export type TryOnResult = {
   url: string | null;
-  engine: "gemini" | "youcam";
+  engine: "gemini" | "youcam" | "qwen";
   status: "ok" | "missing_key" | "image_gen_unavailable" | "error";
   note?: string;
 };
@@ -34,7 +34,7 @@ async function fetchImageBytes(url: string, timeoutMs = 15_000): Promise<{ buffe
   }
 }
 
-export async function generateDogTryOn(input: {
+export async function generateDogTryOnGemini(input: {
   dogImage: { buffer: Buffer; contentType: string };
   product: { imageUrl?: string; title: string; kind: TryOnKind };
 }): Promise<TryOnResult> {

@@ -6,8 +6,9 @@ AI dog stylist + autonomous shopper for the Dog Days hackathon. Upload a dog pho
 
 - Next.js 16 + TypeScript + Tailwind (`apps/web`)
 - Anchor 0.32.1 Solana program (`programs/doge_vault`)
-- YouCam Perfect Corp API: photo enhance + background replacement
-- Gemini: dog profile and product search planning
+- YouCam Perfect Corp API: photo enhance, background replacement, and **human** virtual try-on (`cloth-v3`, `hat`, `shoes` — YouCam is human-only)
+- Gemini: dog profile, stylist script, and product search planning (text only; free-tier keys have no image-generation quota)
+- Qwen / Alibaba DashScope (`qwen-image-3.0-pro`): **dog** virtual try-on via image editing with reference images (preferred when `DASHSCOPE_API_KEY` is set)
 - Apify MCP: `apify/e-commerce-scraping-tool`
 - ElevenLabs: stylist voice
 - Supabase: dog image storage + NFT receipt metadata (Metaplex cNFT points to the metadata URI)
@@ -37,6 +38,14 @@ Important values already configured for devnet:
 S3 is no longer used. Dog images and NFT metadata are stored in Supabase Storage.
 
 Supabase is used for both image storage (`dogevault-images` bucket) and NFT receipt metadata (`dogevault-metadata` bucket). Without Supabase credentials the app still works and returns inline `data:` URLs/URIs for local testing. To enable hosted storage, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `SUPABASE_IMAGES_BUCKET` / `SUPABASE_METADATA_BUCKET`. The service role key is used only server-side in `apps/web/src/lib/supabase.ts`.
+
+### Image generation (dog virtual try-on)
+
+Dog virtual try-on uses an image-generation model; the app prefers **Qwen / DashScope** when `DASHSCOPE_API_KEY` is configured, otherwise falls back to **Gemini** image generation when `GEMINI_API_KEY` is set. Gemini's free tier has **no image-generation quota**, so on a free Gemini key you will see a clear "image generation not enabled" message — set `DASHSCOPE_API_KEY` to enable dog try-on.
+
+- `DASHSCOPE_API_KEY` — Alibaba DashScope (百炼) API key for Qwen image generation.
+- `QWEN_IMAGE_MODEL` — model id, defaults to `qwen-image-3.0-pro`.
+- `DASHSCOPE_BASE_URL` — optional override; defaults to `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`. Use your workspace/region URL if your key is not on the default China endpoint (e.g. `https://dashscope-intl.aliyuncs.com/...` for international, or `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/...`). Model, endpoint, and key must share a region.
 
 ## Develop
 
@@ -76,7 +85,7 @@ anchor deploy --provider.cluster devnet
 
  1. Upload dog photo.
  2. YouCam File API -> **enhance** (sharpen/beautify) the original, then the enhanced result is re-uploaded and fed into **background replacement** (chained pipeline, not two independent passes). The final portrait is stored in Supabase.
- 3. YouCam Virtual Try-On (`cloth-v3`, plus on-demand `hat`/`shoes`) using the selected Apify product image as the garment reference; the clothes try-on result is stored and used as NFT receipt art.
+ 3. **Virtual try-on (hybrid)**. The Gemini profile tags the subject as `dog` or `human`. For a **human** photo, YouCam Virtual Try-On (`cloth-v3`, plus on-demand `hat`/`shoes`) is used with the selected Apify product image as the garment reference. For a **dog**, an image-generation model (Qwen preferred, Gemini fallback) edits the dog photo to wear the exact product, using the dog portrait + product image as reference images. The try-on result is stored in Supabase and used as NFT receipt art. The first product fetched is auto-tried; the UI also offers manual "Try as clothes / hat / shoes" buttons per selected product, each card linking to its product page ("Open product ↗").
  4. Gemini generates dog profile, stylist script, and product queries.
  5. Apify MCP calls `apify/e-commerce-scraping-tool`. That actor runs **asynchronously**: the app starts the run, polls `get-actor-run` until `SUCCEEDED`, then reads `get-dataset-items` and normalizes the product cards. On a real error it surfaces the error (it does **not** silently fall back to mocks).
  6. ElevenLabs converts the stylist script to audio. Free ElevenLabs plans cannot use library voices via the API (HTTP 402 `paid_plan_required`); in that case the UI automatically falls back to the browser's built-in free `SpeechSynthesis`. (Or create your own voice in the ElevenLabs dashboard and set `ELEVENLABS_VOICE_ID` to that custom voice id to use the API for free.)
@@ -93,6 +102,7 @@ The Next.js backend calls the Apify MCP server directly using `APIFY_TOKEN`. If 
 - All Solana actions are on devnet only.
 - The app does not complete real retail purchases; approval simulates funding by transferring devnet USDC to the configured treasury.
 - YouCam and Apify calls require credits/tokens.
+- The agent streams progress to the UI in real time: the `/api/agent?stream=1` SSE endpoint emits `step` events (profiling → products → enhance → background → try-on) that the UI renders as a live stepper; buttons are disabled while the agent is busy.
 
 ## Debugging
 
@@ -114,7 +124,9 @@ Logs are tagged `[dogevault:debug]` and emitted for: Supabase (image/metadata up
 
 - `tests/unit/apify.test.ts` — `normalizeProducts` (real Apify item shape, including array `offers`) and the async run→poll→dataset flow via a mocked MCP client.
 - `tests/unit/youcam.test.ts` — upload / enhance / bg-replace / try-on with a mocked `fetch`.
-- `tests/unit/gemini.test.ts` — profile normalization + missing-key fallback.
+- `tests/unit/gemini.test.ts` — profile normalization (incl. `subjectType` dog/human detection) + missing-key fallback.
+- `tests/unit/geminiTryOn.test.ts` — Gemini dog try-on fallback behavior (missing key, quota, product-reference fetch).
+- `tests/unit/qwenTryOn.test.ts` — Qwen image-editing request shape, reference-image handling, and graceful auth/quota errors.
 - `tests/unit/supabase.test.ts` — image/metadata storage with a mocked client.
 - `tests/unit/nft.test.ts` — Bubblegum V2 `mplx bg nft create` command construction.
 
@@ -128,6 +140,12 @@ RUN_LIVE=1 pnpm test tests/integration/live.test.ts
 SAMPLE_IMAGE_PATH=/path/to/dog.jpg RUN_LIVE=1 pnpm test tests/integration/live.test.ts
 # ElevenLabs live test (lists voices via GET /v1/voices, picks a free voice, synthesizes speech):
 RUN_LIVE=1 ELEVENLABS_API_KEY=... pnpm test tests/integration/elevenlabs.test.ts
+# YouCam try-on against a real photo (youcam-tryon.test.ts uses your own photo):
+SAMPLE_IMAGE_PATH=/path/to/photo.jpg RUN_LIVE=1 pnpm test tests/integration/youcam-tryon.test.ts
+# Gemini image-generation gate (confirms the key can do image generation):
+RUN_LIVE=1 pnpm test tests/integration/gemini-image.test.ts
+# Qwen dog try-on (needs DASHSCOPE_API_KEY; optionally QWEN_TEST_PRODUCT_URL and SAMPLE_IMAGE_PATH):
+RUN_LIVE=1 DASHSCOPE_API_KEY=sk-... pnpm test tests/integration/qwen-tryon.test.ts
 ```
 
 ### Prerequisites
@@ -136,10 +154,11 @@ RUN_LIVE=1 ELEVENLABS_API_KEY=... pnpm test tests/integration/elevenlabs.test.ts
 2. Copy `.env.example` to `.env` and fill what you have. The app runs with missing keys using fallbacks:
    - Missing `GEMINI_API_KEY`: dog profile/script use a built-in mock.
    - Missing `APIFY_TOKEN`: product cards use a mock list (only when the key is absent; a real API *error* is surfaced instead of mocked).
-   - Missing `YOUCAM_API_KEY`: enhanced portrait falls back to the original image.
-   - Missing Supabase vars: NFT metadata returns an inline `data:` URI.
-   - Missing S3 vars: images use base64 data URLs.
-   - ElevenLabs 402 (free plan, library voice): UI falls back to browser `SpeechSynthesis`.
+    - Missing `YOUCAM_API_KEY`: enhanced portrait falls back to the original image.
+    - Missing `DASHSCOPE_API_KEY` and no Gemini image capability: dog virtual try-on returns a clear "image generation not enabled" message; YouCam human try-on still works.
+    - Missing Supabase vars: NFT metadata returns an inline `data:` URI.
+    - Missing S3 vars: images use base64 data URLs.
+    - ElevenLabs 402 (free plan, library voice): UI falls back to browser `SpeechSynthesis`.
 3. Use a Solana devnet wallet (Phantom/Solflare). Airdrop devnet SOL and devnet USDC to your wallet before funding the vault.
 
 ### Run locally
@@ -153,8 +172,9 @@ pnpm dev
 
 1. Click **Connect Wallet** (devnet) and ensure it shows your pubkey.
 2. Choose a dog photo (PNG/JPG/WEBP) and click **Run Dog Agent**.
-   - Expect an enhanced portrait, dog profile chips, a voice button, and Apify product cards.
-   - Provider status badges show `ok` / `missing_key` / `error`.
+    - Expect an enhanced portrait, dog profile chips, a voice button, and Apify product cards (each with an image, price/source/rating, an "Open product ↗" link, and an approve button).
+    - The agent auto-runs a virtual try-on; manual "Try as clothes / hat / shoes" buttons appear for the selected product. For a dog, this uses Qwen/Gemini image generation; for a human, YouCam.
+    - Provider status badges show `ok` / `missing_key` / `error`.
 3. Click **Generate ElevenLabs voice** to hear the stylist line.
 4. Click **1) Initialize vault**, then **2) Fund 25 USDC**.
    - Vault PDA and last transaction link appear.

@@ -31,8 +31,9 @@ export type AgentStepStatus = "start" | "done" | "error";
 export type AgentStep = {
   name: string;
   label: string;
-  status: AgentStepStatus;
+  status: "start" | "done" | "error";
   detail?: string;
+  data?: unknown;
 };
 
 export type AgentResult = {
@@ -41,6 +42,7 @@ export type AgentResult = {
   tryOnImageUrl?: string | null;
   dogProfile: DogProfile;
   products: Product[];
+  tryOnProductId?: string | null;
   providerStatus: {
     youcam: "ok" | "missing_key" | "error";
     gemini: "ok" | "missing_key" | "error";

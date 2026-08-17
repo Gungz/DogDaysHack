@@ -4,7 +4,7 @@ import type { Wallet as AnchorWallet } from "@coral-xyz/anchor";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import type { Transaction } from "@solana/web3.js";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   buildApproveSpendTransaction,
   buildFundVaultTransaction,
@@ -55,10 +55,19 @@ export function DogeVaultApp() {
   const [metadataUri, setMetadataUri] = useState<string | null>(null);
   const [mintResult, setMintResult] = useState<{ mintAddress: string; signature: string } | null>(null);
   const [tryOnUrls, setTryOnUrls] = useState<Record<string, string | null>>({});
+  const [tryOnEngines, setTryOnEngines] = useState<Record<string, string>>({});
+  const [tryOnInfo, setTryOnInfo] = useState<string | null>(null);
   const [tryOnBusy, setTryOnBusy] = useState<string | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
+  const [partial, setPartial] = useState<Partial<AgentResult>>({});
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const selectedProduct = result?.products.find((product) => product.id === selectedProductId) ?? null;
+
+  const view: Partial<AgentResult> = result ?? partial;
+  const profile = view.dogProfile ?? null;
+  const tryOnImage = view.tryOnImageUrl ?? null;
   const vaultAddress = wallet.publicKey ? findVaultPda(wallet.publicKey).toBase58() : null;
 
   async function sendBuiltTransaction(transaction: Transaction) {
@@ -82,6 +91,7 @@ export function DogeVaultApp() {
     setTryOnUrls({});
     setTryOnBusy(null);
     setSteps([]);
+    setPartial({});
     try {
       const formData = new FormData();
       formData.set("image", file);
@@ -114,6 +124,9 @@ export function DogeVaultApp() {
               else next.push(payload.step);
               return next;
             });
+            if (payload.step.data && typeof payload.step.data === "object") {
+              setPartial((prev) => ({ ...prev, ...(payload.step.data as Partial<AgentResult>) }));
+            }
           } else if (payload.type === "result") {
             finalResult = payload.result;
           } else if (payload.type === "error") {
@@ -124,7 +137,8 @@ export function DogeVaultApp() {
 
       if (!finalResult) throw new Error("Agent finished without a result");
       setResult(finalResult);
-      setSelectedProductId(finalResult.products[0]?.id ?? null);
+      setPartial({});
+      setSelectedProductId(finalResult.tryOnProductId ?? finalResult.products[0]?.id ?? null);
     } catch (agentError) {
       setError(agentError instanceof Error ? agentError.message : "Agent failed");
     } finally {
@@ -133,21 +147,22 @@ export function DogeVaultApp() {
   }
 
   async function playStylistVoice() {
-    if (!result) return;
+    const voiceProfile = result ?? partial;
+    if (!voiceProfile?.dogProfile) return;
     setBusy("voice");
     setError(null);
     try {
       const response = await fetch("/api/voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: result.dogProfile.voiceScript }),
+        body: JSON.stringify({ text: voiceProfile.dogProfile.voiceScript }),
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
         // Free ElevenLabs plans can't use library voices via the API. Fall back to the
         // browser's built-in (free) SpeechSynthesis so the stylist still talks.
         if (data.code === "paid_plan_required" && typeof window !== "undefined" && "speechSynthesis" in window) {
-          const utter = new SpeechSynthesisUtterance(result.dogProfile.voiceScript);
+          const utter = new SpeechSynthesisUtterance(voiceProfile.dogProfile.voiceScript);
           window.speechSynthesis.cancel();
           window.speechSynthesis.speak(utter);
           setVoiceUrl(null);
@@ -269,6 +284,7 @@ export function DogeVaultApp() {
     if (!src) return;
     setTryOnBusy(kind);
     setError(null);
+    setTryOnInfo(null);
     try {
       const response = await fetch("/api/tryon", {
         method: "POST",
@@ -277,13 +293,21 @@ export function DogeVaultApp() {
           srcImageUrl: src,
           refImageUrl: selectedProduct.imageUrl,
           kind,
+          title: selectedProduct.title,
+          subjectType: result?.dogProfile.subjectType,
         }),
       });
-      const data = (await response.json()) as { url?: string; error?: string };
-      if (!response.ok || !data.url) throw new Error(data.error || "Try-on failed");
+      const data = (await response.json()) as { url?: string; error?: string; engine?: string };
+      if (!response.ok || !data.url) {
+        if (response.status === 409) {
+          setTryOnInfo(data.error || "Dog try-on is not available on this key.");
+        }
+        throw new Error(data.error || "Try-on failed");
+      }
       setTryOnUrls((prev) => ({ ...prev, [kind]: data.url ?? null }));
+      if (data.engine) setTryOnEngines((prev) => ({ ...prev, [kind]: data.engine as string }));
     } catch (tryError) {
-      setError(tryError instanceof Error ? tryError.message : "Try-on failed");
+      if (!tryOnInfo) setError(tryError instanceof Error ? tryError.message : "Try-on failed");
     } finally {
       setTryOnBusy(null);
     }
@@ -302,7 +326,11 @@ export function DogeVaultApp() {
             </p>
           </div>
           <div className="flex flex-col items-start gap-2 md:items-end">
-            <WalletMultiButton className="!rounded-full !bg-slate-950 !font-bold" />
+            {mounted ? (
+              <WalletMultiButton className="!rounded-full !bg-slate-950 !font-bold" />
+            ) : (
+              <button className="!rounded-full !bg-slate-950 !font-bold h-10 w-40" disabled type="button" />
+            )}
             <p className="text-xs text-slate-500">Program: {solanaConfig.programId.slice(0, 4)}…{solanaConfig.programId.slice(-4)}</p>
           </div>
         </header>
@@ -348,8 +376,8 @@ export function DogeVaultApp() {
                 ) : null}
               </div>
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-100">
-                {result?.enhancedImageUrl ? (
-                  <img src={result.enhancedImageUrl} alt="Enhanced dog portrait" className="h-64 w-full object-cover" />
+                {view?.enhancedImageUrl ? (
+                  <img src={view.enhancedImageUrl} alt="Enhanced dog portrait" className="h-64 w-full object-cover" />
                 ) : file ? (
                   <img src={URL.createObjectURL(file)} alt="Dog preview" className="h-64 w-full object-cover" />
                 ) : (
@@ -358,16 +386,16 @@ export function DogeVaultApp() {
               </div>
             </div>
 
-            {result ? (
+            {profile ? (
               <div className="mt-5 grid gap-4 md:grid-cols-[1fr_220px]">
                 <div className="rounded-3xl bg-slate-950 p-5 text-white">
                   <p className="text-xs font-bold uppercase tracking-[0.25em] text-orange-300">Stylist profile</p>
-                  <h3 className="mt-2 text-xl font-extrabold">{result.dogProfile.breedGuess}</h3>
-                  <p className="mt-2 text-sm text-white/80">{result.dogProfile.stylistSummary}</p>
+                  <h3 className="mt-2 text-xl font-extrabold">{profile.breedGuess}</h3>
+                  <p className="mt-2 text-sm text-white/80">{profile.stylistSummary}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs">{result.dogProfile.vibe}</span>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs">size: {result.dogProfile.size}</span>
-                    {result.dogProfile.colorPalette.map((color) => (
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs">{profile.vibe}</span>
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs">size: {profile.size}</span>
+                    {profile.colorPalette.map((color) => (
                       <span key={color} className="rounded-full bg-white/10 px-3 py-1 text-xs">
                         {color}
                       </span>
@@ -380,38 +408,50 @@ export function DogeVaultApp() {
                     onClick={playStylistVoice}
                     disabled={busy !== null}
                   >
-                    {busy === "voice" ? "Generating voice…" : "Generate ElevenLabs voice"}
+                    {busy === "voice" ? "Generating voice…" : "Generate audio description"}
                   </button>
                   {voiceUrl ? <audio className="mt-4 w-full" controls src={voiceUrl} /> : null}
                   <div className="mt-4 rounded-3xl bg-slate-950 p-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-300">YouCam virtual try-on</p>
-                    {result?.tryOnImageUrl ? (
-                      <img src={result.tryOnImageUrl} alt="Dog in outfit" className="mt-3 h-48 w-full rounded-2xl object-cover" />
+                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-300">Virtual try-on (hybrid)</p>
+                    <p className="mt-1 text-[11px] text-white/50">YouCam for people · Gemini for dogs</p>
+                    {tryOnImage ? (
+                      <img src={tryOnImage} alt="Subject in outfit" className="mt-3 h-48 w-full rounded-2xl object-cover" />
                     ) : (
-                      <p className="mt-3 text-sm text-white/70">Clothes try-on will appear here after the agent runs (needs a product image).</p>
+                      <p className="mt-3 text-sm text-white/70">Auto try-on (clothes) from the agent appears here once a product image is available.</p>
                     )}
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    {tryOnInfo ? (
+                      <p className="mt-3 rounded-2xl bg-amber-500/15 p-3 text-xs text-amber-200">{tryOnInfo}</p>
+                    ) : null}
+                    <div className="mt-3 grid grid-cols-3 gap-2">
                       <button
-                        className="rounded-full bg-emerald-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                        className="rounded-full bg-emerald-500 px-2 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                        onClick={() => runTryOn("clothes")}
+                        disabled={tryOnBusy !== null || !selectedProduct?.imageUrl}
+                      >
+                        {tryOnBusy === "clothes" ? "Trying…" : "Clothes"}
+                      </button>
+                      <button
+                        className="rounded-full bg-emerald-500 px-2 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
                         onClick={() => runTryOn("hat")}
                         disabled={tryOnBusy !== null || !selectedProduct?.imageUrl}
                       >
-                        {tryOnBusy === "hat" ? "Trying…" : "Try as hat"}
+                        {tryOnBusy === "hat" ? "Trying…" : "Hat"}
                       </button>
                       <button
-                        className="rounded-full bg-emerald-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                        className="rounded-full bg-emerald-500 px-2 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
                         onClick={() => runTryOn("shoes")}
                         disabled={tryOnBusy !== null || !selectedProduct?.imageUrl}
                       >
-                        {tryOnBusy === "shoes" ? "Trying…" : "Try as shoes"}
+                        {tryOnBusy === "shoes" ? "Trying…" : "Shoes"}
                       </button>
                     </div>
-                    {tryOnUrls.hat ? (
-                      <img src={tryOnUrls.hat} alt="Dog in hat" className="mt-3 h-40 w-full rounded-2xl object-cover" />
-                    ) : null}
-                    {tryOnUrls.shoes ? (
-                      <img src={tryOnUrls.shoes} alt="Dog in shoes" className="mt-3 h-40 w-full rounded-2xl object-cover" />
-                    ) : null}
+                    {(["clothes", "hat", "shoes"] as const).map((kind) =>
+                      tryOnUrls[kind] ? (
+                        <div key={kind} className="mt-3">
+                          <img src={tryOnUrls[kind] as string} alt={`Subject in ${kind}`} className="h-40 w-full rounded-2xl object-cover" />
+                        </div>
+                      ) : null,
+                    )}
                   </div>
                 </div>
               </div>
@@ -505,12 +545,13 @@ export function DogeVaultApp() {
         <section className="rounded-[2rem] border border-white/70 bg-white/90 p-6 shadow-xl shadow-lime-100/60">
           <h2 className="text-2xl font-extrabold">3. Apify product fetch & approval</h2>
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {result?.products.map((product) => {
+            {view?.products?.map((product) => {
               const selected = product.id === selectedProductId;
+              const isTryOn = product.id === (view?.tryOnProductId ?? null);
               return (
                 <article
                   key={product.id}
-                  className={`rounded-3xl border p-4 transition ${selected ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-white"}`}
+                  className={`rounded-3xl border p-4 transition ${selected ? "border-orange-500 bg-orange-50" : "border-slate-200 bg-white"} ${isTryOn ? "ring-2 ring-emerald-500" : ""}`}
                 >
                   <button className="block w-full text-left" onClick={() => setSelectedProductId(product.id)}>
                     <div className="overflow-hidden rounded-2xl bg-slate-100">
@@ -521,11 +562,26 @@ export function DogeVaultApp() {
                       )}
                     </div>
                     <h3 className="mt-3 line-clamp-2 text-sm font-extrabold">{product.title}</h3>
+                    {isTryOn ? (
+                      <span className="mt-1 inline-block rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                        Used for try-on
+                      </span>
+                    ) : null}
                     <p className="mt-1 text-sm font-bold text-orange-700">{product.priceText ?? "price unknown"}</p>
                     <p className="mt-1 text-xs text-slate-500">
                       {product.source} · rating {product.rating ?? "n/a"} · reviews {product.reviewCount ?? "n/a"}
                     </p>
                   </button>
+                  {product.url && !product.url.startsWith("https://example.com") ? (
+                    <a
+                      href={product.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline"
+                    >
+                      Open product ↗
+                    </a>
+                  ) : null}
                   <button
                     className="mt-4 w-full rounded-full bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
                     onClick={() => approveSelectedProduct(product)}

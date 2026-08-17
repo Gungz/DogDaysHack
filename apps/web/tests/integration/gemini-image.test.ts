@@ -23,7 +23,7 @@ describe.skipIf(!runLive || !apiKey)("gemini image generation (live gate)", () =
         });
         const part = res.candidates?.[0]?.content?.parts?.find((p: { inlineData?: { data?: string; mimeType?: string } }) => p.inlineData);
         expect(part?.inlineData?.data).toBeTruthy();
-        const bytes = Buffer.from(part!.inlineData!.data, "base64");
+        const bytes = Buffer.from(part!.inlineData!.data as string, "base64");
         console.log(`OK model=${model} mime=${part!.inlineData!.mimeType} bytes=${bytes.length}`);
         return;
       } catch (e) {
@@ -48,6 +48,6 @@ describe.skipIf(!runLive || !apiKey)("gemini image generation (live gate)", () =
     });
     const part = res.candidates?.[0]?.content?.parts?.find((p: { inlineData?: { data?: string } }) => p.inlineData);
     expect(part?.inlineData?.data).toBeTruthy();
-    console.log("multi-image input OK, bytes:", Buffer.from(part!.inlineData!.data, "base64").length);
+    console.log("multi-image input OK, bytes:", Buffer.from(part!.inlineData!.data as string, "base64").length);
   });
 });

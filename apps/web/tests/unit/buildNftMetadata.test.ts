@@ -10,6 +10,7 @@ const dogProfile: DogProfile = {
   stylistSummary: "A regal companion.",
   voiceScript: "Hello.",
   productQueries: ["luxury dog collar"],
+  subjectType: "dog",
 };
 
 const product: Product = {
@@ -54,6 +55,7 @@ describe("buildNftMetadata", () => {
       stylistSummary: "",
       voiceScript: "",
       productQueries: [],
+      subjectType: "unknown",
     };
     const minimalProduct: Product = { id: "x", title: "T", url: "https://u", source: "s", queryUsed: "q" };
     const meta = buildNftMetadata({ dogProfile: minimalProfile, product: minimalProduct, enhancedImageUrl: "" });

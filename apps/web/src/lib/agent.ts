@@ -3,7 +3,7 @@ import { generateDogProfile } from "./gemini";
 import { generateDogTryOn } from "./dogTryOn";
 import { storeImage } from "./supabase";
 import { debugStep } from "./log";
-import type { AgentResult, AgentStep, ProductCategory } from "./types";
+import type { AgentResult, AgentStep, DogProfile, ProductCategory } from "./types";
 import {
   enhanceDogPortrait,
   replaceDogBackground,
@@ -29,6 +29,20 @@ export function tryOnKindForProduct(product: { category?: ProductCategory; title
       ? product.category
       : categoryFromText(`${product.title} ${product.queryUsed}`);
   return category === "shoes" || category === "hat" ? category : "clothes";
+}
+
+// Ensure each e-commerce query is specific to the dog. Gemini is asked to embed the
+// breed/size/color already, but we also append any missing attribute so Apify always
+// searches for this dog's actual size/breed/color rather than generic "dog clothes".
+export function tailorQuery(query: string, profile: DogProfile): string {
+  const lower = query.toLowerCase();
+  const parts: string[] = [query];
+  if (profile.size && profile.size !== "unknown" && !lower.includes(profile.size)) parts.push(profile.size);
+  const breed = profile.breedGuess.trim();
+  if (breed && !lower.includes(breed.toLowerCase())) parts.push(breed);
+  const color = profile.colorPalette[0];
+  if (color && !lower.includes(color.toLowerCase())) parts.push(color);
+  return parts.join(" ");
 }
 
 async function safe<T>(label: string, task: () => Promise<T>, notes: string[], onStep?: (step: AgentStep) => void, stepName?: string, stepLabel?: string): Promise<T | null> {
@@ -152,7 +166,7 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
   const apify = await safe(
     "apify-products",
     async () => {
-      const res = await searchProductsWithApify(gemini.profile.productQueries);
+      const res = await searchProductsWithApify(gemini.profile.productQueries.map((q) => tailorQuery(q, gemini.profile)));
       if (res.note) notes.push(res.note);
       if (res.status === "error") throw new Error(res.note || "Apify search failed");
       return res;

@@ -297,12 +297,18 @@ export function DogeVaultApp() {
           subjectType: result?.dogProfile.subjectType,
         }),
       });
-      const data = (await response.json()) as { url?: string; error?: string; engine?: string };
+      let data: { url?: string; error?: string; engine?: string };
+      try {
+        data = (await response.json()) as { url?: string; error?: string; engine?: string };
+      } catch {
+        data = {};
+      }
       if (!response.ok || !data.url) {
+        const message = data.error || `Try-on failed (HTTP ${response.status})`;
         if (response.status === 409) {
           setTryOnInfo(data.error || "Dog try-on is not available on this key.");
         }
-        throw new Error(data.error || "Try-on failed");
+        throw new Error(message);
       }
       setTryOnUrls((prev) => ({ ...prev, [kind]: data.url ?? null }));
       if (data.engine) setTryOnEngines((prev) => ({ ...prev, [kind]: data.engine as string }));

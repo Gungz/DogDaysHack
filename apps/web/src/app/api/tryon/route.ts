@@ -34,8 +34,24 @@ export async function POST(request: Request) {
       }
     }
 
+    const srcController = new AbortController();
+    const srcTimer = setTimeout(() => srcController.abort(), 20_000);
+    let srcBytes: Buffer;
+    try {
+      const srcRes = await fetch(srcImageUrl, { signal: srcController.signal });
+      if (!srcRes.ok) throw new Error(`Source image fetch failed: ${srcRes.status}`);
+      srcBytes = Buffer.from(await srcRes.arrayBuffer());
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return NextResponse.json({ error: "Source image fetch timed out" }, { status: 504 });
+      }
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Source image fetch failed" }, { status: 502 });
+    } finally {
+      clearTimeout(srcTimer);
+    }
+
     const result = await generateDogTryOn({
-      dogImage: { buffer: Buffer.from(await (await fetch(srcImageUrl)).arrayBuffer()), contentType: "image/jpeg" },
+      dogImage: { buffer: srcBytes, contentType: "image/jpeg" },
       product: { imageUrl: refImageUrl, title: body.title || "product", kind },
     });
     if (!result.url) {
@@ -43,6 +59,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ url: result.url, engine: "gemini" });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Try-on failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Try-on failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

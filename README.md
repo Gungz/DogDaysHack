@@ -156,7 +156,7 @@ RUN_LIVE=1 DASHSCOPE_API_KEY=sk-... pnpm test tests/integration/qwen-tryon.test.
    - The app runs with other missing keys using fallbacks:
      - Missing `GEMINI_API_KEY`: dog profile/script use a built-in mock.
      - Missing `APIFY_TOKEN`: product cards use a mock list (only when the key is absent; a real API *error* is surfaced instead of mocked).
-     - Missing `YOUCAM_API_KEY`: enhanced portrait falls back to the original image.
+     - Missing `YOUCAM_API_KEY` or a YouCam upload/API failure: the agent **stops and surfaces the error to the user** (it no longer silently falls back to the original image). YouCam network calls time out after 30s with a clear message.
      - Missing Supabase vars: NFT metadata returns an inline `data:` URI.
      - Missing S3 vars: images use base64 data URLs.
      - ElevenLabs 402 (free plan, library voice): UI falls back to browser `SpeechSynthesis`.

@@ -5,25 +5,39 @@ type YouCamFileResult = {
   fileId: string;
 };
 
+const YOUCAM_TIMEOUT_MS = 30_000;
+
 async function youcamFetch<T>(path: string, init: RequestInit): Promise<T> {
   const env = getServerEnv();
   if (!env.youcamApiKey) throw new Error("Missing YOUCAM_API_KEY");
 
-  const response = await fetch(`${env.youcamBaseUrl}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${env.youcamApiKey}`,
-      ...(init.body && typeof init.body === "string" ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), YOUCAM_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${env.youcamBaseUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${env.youcamApiKey}`,
+        ...(init.body && typeof init.body === "string" ? { "Content-Type": "application/json" } : {}),
+        ...(init.headers || {}),
+      },
+    });
 
-  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!response.ok) {
-    const message = data?.error || data?.error_code || response.statusText;
-    throw new Error(`YouCam request failed: ${response.status} ${String(message)}`);
+    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!response.ok) {
+      const message = data?.error || data?.error_code || response.statusText;
+      throw new Error(`YouCam request failed: ${response.status} ${String(message)}`);
+    }
+    return data as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`YouCam request timed out after ${YOUCAM_TIMEOUT_MS}ms (${path})`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  return data as T;
 }
 
 export async function uploadDogImage(fileName: string, contentType: string, bytes: Buffer): Promise<YouCamFileResult> {
@@ -51,13 +65,25 @@ export async function uploadDogImage(fileName: string, contentType: string, byte
   const upload = uploaded?.requests?.[0];
   if (!uploaded?.file_id || !upload?.url) throw new Error("YouCam did not return a file upload URL");
 
-  const uploadResponse = await fetch(upload.url, {
-    method: upload.method || "PUT",
-    headers: upload.headers || { "Content-Type": contentType },
-    body: new Blob([new Uint8Array(bytes)], { type: contentType }),
-  });
-  if (!uploadResponse.ok) {
-    throw new Error(`YouCam direct upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+  const uploadController = new AbortController();
+  const uploadTimer = setTimeout(() => uploadController.abort(), YOUCAM_TIMEOUT_MS);
+  try {
+    const uploadResponse = await fetch(upload.url, {
+      method: upload.method || "PUT",
+      headers: upload.headers || { "Content-Type": contentType },
+      body: new Blob([new Uint8Array(bytes)], { type: contentType }),
+      signal: uploadController.signal,
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`YouCam direct upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`YouCam direct upload timed out after ${YOUCAM_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(uploadTimer);
   }
 
   return { fileId: uploaded.file_id };

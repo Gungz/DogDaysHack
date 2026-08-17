@@ -64,11 +64,20 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
   );
   debugStep("supabase-original", { size: bytes.length }, storedOriginalUrl);
 
-  const youcamUpload = await safe(
-    "youcam-upload",
-    () => uploadDogImage(file.name, file.type, bytes),
-    notes,
-  );
+  // YouCam upload is mandatory for the portrait pipeline. A genuine upload failure
+  // (network/API error, or missing key) must stop the agent and surface the error
+  // to the user — we do NOT silently fall back to the original image here.
+  let youcamUpload: { fileId: string } | null = null;
+  try {
+    onStep?.({ name: "upload", label: "Uploading photo to YouCam", status: "start" });
+    youcamUpload = await uploadDogImage(file.name, file.type, bytes);
+    onStep?.({ name: "upload", label: "Uploading photo to YouCam", status: "done" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "YouCam upload failed";
+    notes.push(`youcam-upload: ${message}`);
+    onStep?.({ name: "upload", label: "Uploading photo to YouCam", status: "error", detail: message });
+    throw new Error(`YouCam upload failed: ${message}`);
+  }
   debugStep("youcam-upload", { fileName: file.name }, youcamUpload);
 
   let enhancedUrl: string | null = null;
@@ -162,12 +171,12 @@ export async function runDogAgent(file: File, onStep?: (step: AgentStep) => void
   const firstProductWithImage = apify.products.find((p) => p.imageUrl);
   let tryOnImageUrl: string | null = null;
   let tryOnKind: TryOnKind | null = null;
-  let tryOnEngine: "gemini" | "youcam" | null = null;
+  let tryOnEngine: "qwen/gemini" | "youcam" | null = null;
 
   if (firstProductWithImage?.imageUrl) {
     tryOnKind = tryOnKindForProduct(firstProductWithImage);
     const isHuman = gemini.profile.subjectType === "human";
-    tryOnEngine = isHuman ? "youcam" : "gemini";
+    tryOnEngine = isHuman ? "youcam" : "qwen/gemini";
     onStep?.({ name: "tryon", label: `Virtual try-on (${tryOnEngine}): ${tryOnKind}`, status: "start", data: { tryOnProductId: firstProductWithImage?.id ?? null } });
 
     try {
